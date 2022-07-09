@@ -1,0 +1,31 @@
+apply plugin: 'java'
+apply plugin: 'eclipse'
+apply plugin: 'application'
+
+mainClassName = 'Test3_0'
+
+// tag::repositories[]
+repositories {
+//     mavenCentral()
+    maven { url "https://maven.aliyun.com/repository/public" }
+    maven { url "https://maven.aliyun.com/repository/spring" }
+}
+// end::repositories[]
+
+// tag::jar[]
+jar {
+    version="0.1"
+}
+// end::jar[]
+
+// tag::dependencies[]
+sourceCompatibility = 1.8
+targetCompatibility = 1.8
+
+dependencies {
+        compile(project(":spring-aop"))
+//     compile(project(":spring-beans"))
+    compile(project(":spring-context"))
+//     compile(project(":spring-"))
+    compile("org.aspectj:aspectjweaver:${aspectjVersion}")  // for Maven POM exposure
+}
