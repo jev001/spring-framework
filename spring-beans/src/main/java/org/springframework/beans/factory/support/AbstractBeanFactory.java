@@ -244,7 +244,15 @@ public abstract class AbstractBeanFactory extends FactoryBeanRegistrySupport imp
 		Object bean;
 
 		// Eagerly check singleton cache for manually registered singletons.
+		// 此处入口有多处. 目前讨论单例bean的创建流程和循环依赖的居多
+		// 1. 在A->B,B->A 的情况中 此处beanName=a的会进入两次.
+		// 第一次是A第一个进入,此时什么都没有,判断getSingleton也是啥都没有的情况
+		// 第二次是A在B创建依赖(A1)时进入,此时进入是可以获取到在第一次创建的空壳Bean存入到earlySingleObject中
+		
 		Object sharedInstance = getSingleton(beanName);
+		// 不管是否循环依赖===>从singleObject中获取还是earlyObject中获取.只要args能为空则进入该方法.
+		// 如果不进入还不行 因为不进入代表返回的bean为Null了======>此处args不为null的情况基本忽略===>这个情况一般不会出现在 启动spring,单例bean的创建流程中
+		// 因为全流程autowire都是通过beanName获取对象的 getBean(beanName) 不存在参数,只有外部调用的才会存在参数
 		if (sharedInstance != null && args == null) {
 			if (logger.isDebugEnabled()) {
 				if (isSingletonCurrentlyInCreation(beanName)) {
@@ -255,6 +263,7 @@ public abstract class AbstractBeanFactory extends FactoryBeanRegistrySupport imp
 					logger.debug("Returning cached instance of singleton bean '" + beanName + "'");
 				}
 			}
+			// 将单例池中的bean或者earlybean创建出来====>此处主要是针对工厂方法bean等 属于增强型的操作,在讨论循环依赖时可以忽略不记
 			bean = getObjectForBeanInstance(sharedInstance, name, beanName, null);
 		}
 
@@ -305,6 +314,16 @@ public abstract class AbstractBeanFactory extends FactoryBeanRegistrySupport imp
 					}
 				}
 
+				// 单例bean的创建.
+				// 1. 单例bean特点: spring全局只保留一份数据
+				// 1.1 所以需要__严格__ 保证当前只有该bean在创建,并发创建单例bean是不被允许的
+				// 1.2 在getSingleton 内部实现中,针对1.1的 必要条件做了如下行为
+				// 1.2.1 使用sync锁锁住单例池,从单例池中获取,是否可以获取到对象===>避免因为并发情况,之前已经创建了.===>经典DOUBLE CHECK问题
+				// 1.2.1.1 此处原本认为可以使用getSingleton是类似的.其实不然,因为此时已经处于创建过程中了.直接判断singleObject比较好.而且如果使用getSingle的方式,还容易因为处于创建过程中将object返回出去
+				// 1.2.2 使用singleCurrentCreate标记当前是否正在创建该bean===>同样是并发创建问题,独占创建bean的流程锁===>添加独占并发锁问题
+				// 1.2.3 创建bean的流程===>透传到上游方法☆☆☆☆☆☆☆☆ 重要着重需要理解的部分,创建bean的核心流程
+				// 1.2.4 将创建好的bean 放入单例池
+				// 1.2.5 将singleCuurentCreate去除=====>释放独占锁
 				// Create bean instance.
 				if (mbd.isSingleton()) {
 					sharedInstance = getSingleton(beanName, () -> {
@@ -322,6 +341,10 @@ public abstract class AbstractBeanFactory extends FactoryBeanRegistrySupport imp
 					bean = getObjectForBeanInstance(sharedInstance, name, beanName, mbd);
 				}
 
+				
+				// 原型bean的创建,
+				// 相较于单例bean没有全局唯一的情况,所以不需要那么复杂的bean加锁并发问题,
+				// 行为和直接调用createBean流程一样
 				else if (mbd.isPrototype()) {
 					// It's a prototype -> create a new instance.
 					Object prototypeInstance = null;
@@ -335,6 +358,16 @@ public abstract class AbstractBeanFactory extends FactoryBeanRegistrySupport imp
 					bean = getObjectForBeanInstance(prototypeInstance, name, beanName, mbd);
 				}
 
+				// 具有不同生命周期的bean
+				// 特有的数据===>主要是针对 aop/springweb.request/springweb.session做特殊的生命周期管控
+				// 1. 单例整个jvm生命周期,
+				// 2. 原型不加入生命周期管控,即用即死
+				// 3. 自定义生命周期
+//				@see ConfigurableBeanFactory#registerScope
+//													 * @see CustomScopeConfigurer
+//													 * @see org.springframework.aop.scope.ScopedProxyFactoryBean
+//													 * @see org.springframework.web.context.request.RequestScope
+//													 * @see org.springframework.web.context.request.SessionScope
 				else {
 					String scopeName = mbd.getScope();
 					final Scope scope = this.scopes.get(scopeName);
@@ -402,7 +435,7 @@ public abstract class AbstractBeanFactory extends FactoryBeanRegistrySupport imp
 	public boolean isSingleton(String name) throws NoSuchBeanDefinitionException {
 		String beanName = transformedBeanName(name);
 
-		Object beanInstance = getSingleton(beanName, false);
+		Object beanInstance = getSingleton(beanName, false,"isSingleton");
 		if (beanInstance != null) {
 			if (beanInstance instanceof FactoryBean) {
 				return (BeanFactoryUtils.isFactoryDereference(name) || ((FactoryBean<?>) beanInstance).isSingleton());
@@ -482,7 +515,7 @@ public abstract class AbstractBeanFactory extends FactoryBeanRegistrySupport imp
 		String beanName = transformedBeanName(name);
 
 		// Check manually registered singletons.
-		Object beanInstance = getSingleton(beanName, false);
+		Object beanInstance = getSingleton(beanName, false,"isTypeMatch");
 		if (beanInstance != null && beanInstance.getClass() != NullBean.class) {
 			if (beanInstance instanceof FactoryBean) {
 				if (!BeanFactoryUtils.isFactoryDereference(name)) {
@@ -591,7 +624,7 @@ public abstract class AbstractBeanFactory extends FactoryBeanRegistrySupport imp
 		String beanName = transformedBeanName(name);
 
 		// Check manually registered singletons.
-		Object beanInstance = getSingleton(beanName, false);
+		Object beanInstance = getSingleton(beanName, false,"getType");
 		if (beanInstance != null && beanInstance.getClass() != NullBean.class) {
 			if (beanInstance instanceof FactoryBean && !BeanFactoryUtils.isFactoryDereference(name)) {
 				return getTypeForFactoryBean((FactoryBean<?>) beanInstance);
@@ -993,7 +1026,7 @@ public abstract class AbstractBeanFactory extends FactoryBeanRegistrySupport imp
 	public boolean isFactoryBean(String name) throws NoSuchBeanDefinitionException {
 		String beanName = transformedBeanName(name);
 
-		Object beanInstance = getSingleton(beanName, false);
+		Object beanInstance = getSingleton(beanName, false,"isFactoryBean");
 		if (beanInstance != null) {
 			return (beanInstance instanceof FactoryBean);
 		}

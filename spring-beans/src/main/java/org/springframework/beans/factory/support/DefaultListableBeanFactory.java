@@ -758,22 +758,22 @@ public class DefaultListableBeanFactory extends AbstractAutowireCapableBeanFacto
 			}
 		}
 
-		// Trigger post-initialization callback for all applicable beans...
-		for (String beanName : beanNames) {
-			Object singletonInstance = getSingleton(beanName);
-			if (singletonInstance instanceof SmartInitializingSingleton) {
-				final SmartInitializingSingleton smartSingleton = (SmartInitializingSingleton) singletonInstance;
-				if (System.getSecurityManager() != null) {
-					AccessController.doPrivileged((PrivilegedAction<Object>) () -> {
-						smartSingleton.afterSingletonsInstantiated();
-						return null;
-					}, getAccessControlContext());
-				}
-				else {
-					smartSingleton.afterSingletonsInstantiated();
-				}
-			}
-		}
+//		// Trigger post-initialization callback for all applicable beans...
+//		for (String beanName : beanNames) {
+//			Object singletonInstance = getSingleton(beanName);
+//			if (singletonInstance instanceof SmartInitializingSingleton) {
+//				final SmartInitializingSingleton smartSingleton = (SmartInitializingSingleton) singletonInstance;
+//				if (System.getSecurityManager() != null) {
+//					AccessController.doPrivileged((PrivilegedAction<Object>) () -> {
+//						smartSingleton.afterSingletonsInstantiated();
+//						return null;
+//					}, getAccessControlContext());
+//				}
+//				else {
+//					smartSingleton.afterSingletonsInstantiated();
+//				}
+//			}
+//		}
 	}
 
 
@@ -1037,6 +1037,7 @@ public class DefaultListableBeanFactory extends AbstractAutowireCapableBeanFacto
 		return null;
 	}
 
+	// 重要此处是属性依赖时,解决依赖的回调.本质上也是为了在创建单例bean时填充依赖属性,此处容易出现循环依赖
 	@Override
 	@Nullable
 	public Object resolveDependency(DependencyDescriptor descriptor, @Nullable String requestingBeanName,
@@ -1512,7 +1513,7 @@ public class DefaultListableBeanFactory extends AbstractAutowireCapableBeanFacto
 			if (targetType != null && type.isAssignableFrom(targetType) &&
 					isAutowireCandidate(beanName, mbd, descriptor, getAutowireCandidateResolver())) {
 				// Probably a proxy interfering with target type match -> throw meaningful exception.
-				Object beanInstance = getSingleton(beanName, false);
+				Object beanInstance = getSingleton(beanName, false,"checkBeanNotOfRequiredType");
 				Class<?> beanType = (beanInstance != null && beanInstance.getClass() != NullBean.class) ?
 						beanInstance.getClass() : predictBeanType(beanName, mbd);
 				if (beanType != null && !type.isAssignableFrom(beanType)) {

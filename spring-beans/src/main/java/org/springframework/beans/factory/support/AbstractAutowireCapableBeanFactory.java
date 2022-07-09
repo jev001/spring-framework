@@ -498,6 +498,12 @@ public abstract class AbstractAutowireCapableBeanFactory extends AbstractBeanFac
 					"BeanPostProcessor before instantiation of bean failed", ex);
 		}
 
+		// 创建bean的流程中分两步
+		// 1. 查找bean的定义
+		// 2. 创建bean
+		
+		// spring针对一些生命周期的特性.比如依靠后置处理器,创建bean等. 这样的增强方式创建的bean绕过普通创建流程将bean暴露出去====>这类的黑魔法都是为了spring高级功能体现的.
+		// 实际上不需要那个高级功能就是创建bean了
 		try {
 			Object beanInstance = doCreateBean(beanName, mbdToUse, args);
 			if (logger.isDebugEnabled()) {
@@ -541,6 +547,7 @@ public abstract class AbstractAutowireCapableBeanFactory extends AbstractBeanFac
 		if (mbd.isSingleton()) {
 			instanceWrapper = this.factoryBeanInstanceCache.remove(beanName);
 		}
+		// 创建一个空壳bean. 实现bean的无参构造===>
 		if (instanceWrapper == null) {
 			instanceWrapper = createBeanInstance(beanName, mbd, args);
 		}
@@ -550,6 +557,7 @@ public abstract class AbstractAutowireCapableBeanFactory extends AbstractBeanFac
 			mbd.resolvedTargetType = beanType;
 		}
 
+		// 此处先忽略
 		// Allow post-processors to modify the merged bean definition.
 		synchronized (mbd.postProcessingLock) {
 			if (!mbd.postProcessed) {
@@ -564,6 +572,8 @@ public abstract class AbstractAutowireCapableBeanFactory extends AbstractBeanFac
 			}
 		}
 
+		// 早期的spring框架中不在此处判断该bean是否处于进行中. 并且也不是将objectFactory放入三级缓存中
+		// 早期此处判断是否循环引用就可以了就需要将刚刚创建的 空壳Bean放入缓存中
 		// Eagerly cache singletons to be able to resolve circular references
 		// even when triggered by lifecycle interfaces like BeanFactoryAware.
 		boolean earlySingletonExposure = (mbd.isSingleton() && this.allowCircularReferences &&
@@ -577,6 +587,10 @@ public abstract class AbstractAutowireCapableBeanFactory extends AbstractBeanFac
 		}
 
 		// Initialize the bean instance.
+		// 空壳bean需要填充属性了====>populateBean是重点.
+		// 在ioc容器中, 创建bean的方式可以分为,全部bean先创建空壳,再然后逐个将空壳数据填充,此时就无需担心循环引用问题,因为bean是提前创建好的,此种方式适合bean的数量较少的情况,实现简单复杂度不高.
+		// spring后续选用了一种边创建bean边创建依赖的方式,此方式的实现就在populateBean中
+		// 对populateBean的说明, 此种方式只出现在使用@bean和xml中配置.使用autowire是不会出现的
 		Object exposedObject = bean;
 		try {
 			populateBean(beanName, mbd, instanceWrapper);
@@ -593,7 +607,7 @@ public abstract class AbstractAutowireCapableBeanFactory extends AbstractBeanFac
 		}
 
 		if (earlySingletonExposure) {
-			Object earlySingletonReference = getSingleton(beanName, false);
+			Object earlySingletonReference = getSingleton(beanName, false,"doCreateBean_earlySingletonExposure");
 			if (earlySingletonReference != null) {
 				if (exposedObject == bean) {
 					exposedObject = earlySingletonReference;
@@ -898,7 +912,13 @@ public abstract class AbstractAutowireCapableBeanFactory extends AbstractBeanFac
 	 * @return the object to expose as bean reference
 	 */
 	protected Object getEarlyBeanReference(String beanName, RootBeanDefinition mbd, Object bean) {
+		if(beanName.contains("test.inject")){
+			logger.info(String.format("进入:[getEarlyBeanReference]===>beanName=[%s],bean=[%s]",beanName,bean));
+		}
+		Object originBean = bean;
 		Object exposedObject = bean;
+		// 不是虚假的？不是人造的？这个是什么意思？
+		// 从流程上来看BeanPostProcess中在启动的时创建的单例bean涉及到的不多. 其中autowiredAnnotion的getEarly返回当前Bean. 目前看到大多反应在AutoAspectJ上存在修改Bean的情况
 		if (!mbd.isSynthetic() && hasInstantiationAwareBeanPostProcessors()) {
 			for (BeanPostProcessor bp : getBeanPostProcessors()) {
 				if (bp instanceof SmartInstantiationAwareBeanPostProcessor) {
@@ -907,6 +927,7 @@ public abstract class AbstractAutowireCapableBeanFactory extends AbstractBeanFac
 				}
 			}
 		}
+//		logger.info(String.format("退出:[getEarlyBeanReference]===>beanName=[%s],bean=[%s],exposedObject=[%s]",beanName,originBean,exposedObject));
 		return exposedObject;
 	}
 
@@ -1311,6 +1332,12 @@ public abstract class AbstractAutowireCapableBeanFactory extends AbstractBeanFac
 			return;
 		}
 
+		// 该bean的来源是通过autowire属性得来的吗？ 此处不太明白
+		// 有点奇怪.此处是当前创建的bean填充已知需要的该bean的其他bean. 那样的话,
+		// A->B ,B->A A在创建的时候并不会将自己填充出去,
+		// 此功能只有在使用@Bean(autowire = ) 或者是xml中<bean autowire="byType" class="test.inject.BXmlService"/> 才有作用
+		// 如果是普通的Autowire是不混进入到该方法中的
+		// 如果是做循环依赖度的demo,并且使用的是autowire注解 和@component,此处可以忽略
 		if (mbd.getResolvedAutowireMode() == RootBeanDefinition.AUTOWIRE_BY_NAME ||
 				mbd.getResolvedAutowireMode() == RootBeanDefinition.AUTOWIRE_BY_TYPE) {
 			MutablePropertyValues newPvs = new MutablePropertyValues(pvs);
@@ -1331,6 +1358,8 @@ public abstract class AbstractAutowireCapableBeanFactory extends AbstractBeanFac
 		boolean hasInstAwareBpps = hasInstantiationAwareBeanPostProcessors();
 		boolean needsDepCheck = (mbd.getDependencyCheck() != RootBeanDefinition.DEPENDENCY_CHECK_NONE);
 
+		// 此处是后置处理器的实现过程
+		// 对于使用Autowired进行属性依赖的需要注意 autowiredAnnotationBeanPostProcess 这个方法 这个是依赖注入的关键, 循环依赖会调用到这里的
 		if (hasInstAwareBpps || needsDepCheck) {
 			PropertyDescriptor[] filteredPds = filterPropertyDescriptorsForDependencyCheck(bw, mbd.allowCaching);
 			if (hasInstAwareBpps) {

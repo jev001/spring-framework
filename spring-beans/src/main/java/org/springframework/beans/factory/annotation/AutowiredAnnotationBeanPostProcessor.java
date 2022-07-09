@@ -364,6 +364,7 @@ public class AutowiredAnnotationBeanPostProcessor extends InstantiationAwareBean
 
 		InjectionMetadata metadata = findAutowiringMetadata(beanName, bean.getClass(), pvs);
 		try {
+			// 对属性需要的属性进行注入. 查找☆☆☆☆☆☆☆☆☆☆☆☆☆☆☆ 此处是可以实现IOC的关键所在
 			metadata.inject(bean, beanName, pvs);
 		}
 		catch (BeanCreationException ex) {
@@ -563,18 +564,24 @@ public class AutowiredAnnotationBeanPostProcessor extends InstantiationAwareBean
 
 		@Override
 		protected void inject(Object bean, @Nullable String beanName, @Nullable PropertyValues pvs) throws Throwable {
+			// autowire针对字段注入和方法注入分别有两个实现方式 为autowiredFiledElement 还有一个是AutowiredMethodElemnt
+			// 而spring针对一些常用的注解也进行了autowire增强 分别是EjbRefElement 和WebServiceRefElement还有ResourceElement
+			// 这个也是为什么使用@Resource注解可以实现注入的原因所在
 			Field field = (Field) this.member;
 			Object value;
 			if (this.cached) {
 				value = resolvedCachedArgument(beanName, this.cachedFieldValue);
 			}
 			else {
+				// 查找该字段的部分属性
 				DependencyDescriptor desc = new DependencyDescriptor(field, this.required);
 				desc.setContainingClass(bean.getClass());
 				Set<String> autowiredBeanNames = new LinkedHashSet<>(1);
 				Assert.state(beanFactory != null, "No BeanFactory available");
 				TypeConverter typeConverter = beanFactory.getTypeConverter();
 				try {
+					// 调用beanFactory去解决依赖问题
+					logger.info(String.format("检查到存在依赖需要被注入,需要被解决,那么使用BeanFactory依次创建bean就可以了 org.springframework.beans.factory.support.DefaultListableBeanFactory"));
 					value = beanFactory.resolveDependency(desc, beanName, autowiredBeanNames, typeConverter);
 				}
 				catch (BeansException ex) {

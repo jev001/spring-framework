@@ -16,12 +16,15 @@
 
 package org.springframework.beans.factory.support;
 
+import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
@@ -167,9 +170,14 @@ public class DefaultSingletonBeanRegistry extends SimpleAliasRegistry implements
 	@Override
 	@Nullable
 	public Object getSingleton(String beanName) {
-		return getSingleton(beanName, true);
+		return getSingleton(beanName, true,"doGetBean.getSingleton==>args_1");
 	}
+	List<String> stackInfo = new ArrayList<>();
+	int sept = 0;
 
+	List<String> ignore = Arrays.asList("isTypeMatch","getType","isSingleton");
+	List<String> expect = Arrays.asList("doGetBean.getSingleton==>args_1","doCreateBean_earlySingletonExposure");
+	
 	/**
 	 * Return the (raw) singleton object registered under the given name.
 	 * <p>Checks already instantiated singletons and also allows for an early
@@ -179,24 +187,53 @@ public class DefaultSingletonBeanRegistry extends SimpleAliasRegistry implements
 	 * @return the registered singleton object, or {@code null} if none found
 	 */
 	@Nullable
-	protected Object getSingleton(String beanName, boolean allowEarlyReference) {
+	protected Object getSingleton(String beanName, boolean allowEarlyReference,String sourceName) {
 		Object singletonObject = this.singletonObjects.get(beanName);
+		// 增加ignore 输出想要留下的堆栈信息
+		if(beanName.contains("test.inject")&&expect.contains(sourceName)){
+			
+//			logger.info(String.format("进入:[getSingleton]===>beanName=[%s],singletonObject=[%s],thread=[%s],sept=[%s],stackInfo=[%s]",beanName,singletonObject,Thread.currentThread(),sept, stactInfo(beanName,Thread.currentThread().getStackTrace())));
+//			logger.info(String.format("进入:[getSingleton]===>beanName=[%s],singletonObject=[%s],thread=[%s],sept=[%s],stackInfo=[%s]",beanName,singletonObject,Thread.currentThread(),sept, sourceName));
+			logger.info(String.format("进入:[getSingleton]===>beanName=[%s],singletonObject=[%s],source=[%s],stactInfo=[%s]",beanName,singletonObject,sourceName,stactInfo(beanName,Thread.currentThread().getStackTrace(),sourceName)));
+//			stackInfo.add(beanName);
+//			sept++;
+		}
+		// 循环依赖中A->B B->A ,在创建A,空壳后,current已经置为true了,在创建B时需要依赖A此时将 查看一下earSingleObject有没有.没有则创建一个.object======>
+		// 此处一定需要注意的是循环依赖较深的时候earlySingleObject,作用才凸显出来. 如果只有一级依赖,则无所谓这个early。五角星====>也就是说earlyObject是为了解决深层次循环依赖而表现出来的
+		// 比如 A->B ,B->A, B->C B->D,C->A,D->A 其中在创建B时是early为空从factory中获取,其他两个从earlySingleObject中获取
 		if (singletonObject == null && isSingletonCurrentlyInCreation(beanName)) {
 			synchronized (this.singletonObjects) {
 				singletonObject = this.earlySingletonObjects.get(beanName);
 				if (singletonObject == null && allowEarlyReference) {
 					ObjectFactory<?> singletonFactory = this.singletonFactories.get(beanName);
+//					logger.info(String.format("进入:[getSingleton]===>beanName=[%s],singletonFactory=[%s]",beanName,singletonFactory));
 					if (singletonFactory != null) {
 						singletonObject = singletonFactory.getObject();
 						this.earlySingletonObjects.put(beanName, singletonObject);
+//						logger.info(String.format("进入:[getSingleton]===>beanName=[%s],earlySingletonObjects=[%s]",beanName,singletonObject));
 						this.singletonFactories.remove(beanName);
 					}
 				}
 			}
 		}
+//		if(beanName.contains("test.inject")){
+////			logger.info(String.format("进入:[getSingleton]===>beanName=[%s],singletonObject=[%s],thread=[%s],stackInfo=[%s]",beanName,singletonObject,Thread.currentThread(), stactInfo(beanName,Thread.currentThread().getStackTrace())));
+//			logger.info(String.format("进入:[getSingleton]===sept=[%s]<pop====>[%s]",sept,stackInfo));
+//		}
 		return singletonObject;
 	}
-
+	
+	private String stactInfo(String beanName, StackTraceElement[] stackTrace,String source) {
+		if(!expect.contains(source)){
+			return "";
+		}
+		StringBuilder sb = new StringBuilder(String.format("getSingleBean for beanName=[%s]",beanName)).append("\r\n");
+		for (int i = 0; i < stackTrace.length; i++) {
+			sb.append(String.format("[%s]==>",i)).append(stackTrace[i].toString()).append("\r\n");
+		}
+		return sb.toString();
+	}
+	
 	/**
 	 * Return the (raw) singleton object registered under the given name,
 	 * creating and registering a new one if none registered yet.
@@ -225,6 +262,7 @@ public class DefaultSingletonBeanRegistry extends SimpleAliasRegistry implements
 					this.suppressedExceptions = new LinkedHashSet<>();
 				}
 				try {
+					// 创建bean的过程
 					singletonObject = singletonFactory.getObject();
 					newSingleton = true;
 				}
@@ -250,6 +288,8 @@ public class DefaultSingletonBeanRegistry extends SimpleAliasRegistry implements
 					}
 					afterSingletonCreation(beanName);
 				}
+				// 在讨论循环依赖是A->B,B->A A创建的过程中,创建B,过程中创建A1(使用的还是A),结果返回了.所以按照出入站的先后顺序是
+				// A->B B->A1,只有B先到了AddSingleton的方法中.此时因为已经将所有依赖都添加上去了 是一个完整的bean,所以下方在添加到单例池中需要将early中的移除
 				if (newSingleton) {
 					addSingleton(beanName, singletonObject);
 				}

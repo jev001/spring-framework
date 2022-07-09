@@ -82,6 +82,7 @@ public class InjectionMetadata {
 		Collection<InjectedElement> checkedElements = this.checkedElements;
 		Collection<InjectedElement> elementsToIterate =
 				(checkedElements != null ? checkedElements : this.injectedElements);
+		// 对需要注入的对象进行beanName方式的注入====>Autowired依靠的注入方式是 beanName☆☆☆☆☆☆
 		if (!elementsToIterate.isEmpty()) {
 			boolean debug = logger.isDebugEnabled();
 			for (InjectedElement element : elementsToIterate) {
@@ -174,6 +175,7 @@ public class InjectionMetadata {
 			if (this.isField) {
 				Field field = (Field) this.member;
 				ReflectionUtils.makeAccessible(field);
+				// 获取到该bean其 其中底层实现是getSingleton或者是getBean
 				field.set(target, getResourceToInject(target, requestingBeanName));
 			}
 			else {

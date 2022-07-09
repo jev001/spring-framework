@@ -247,7 +247,9 @@ public class DependencyDescriptor extends InjectionPoint implements Serializable
 	 */
 	public Object resolveCandidate(String beanName, Class<?> requiredType, BeanFactory beanFactory)
 			throws BeansException {
-
+		// 依赖解决的方式是通过名称在beanFactory中获取一下.
+		// 此处也是spring会产生循环依赖的一个入口之一
+		// 比如A->B,B->A 在创建A时,过程中需要获取B.没有获取到则创建B.在创建B的过程中需要A属性,则又回到了创建A的过程.
 		return beanFactory.getBean(beanName);
 	}
 
